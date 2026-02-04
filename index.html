@@ -8,7 +8,6 @@
         :root { --primary: #00ff41; --bg: #000; --card: #111; --accent: #003b00; --fav: #ff4757; --warn: #ffae00; --err: #ff0000; }
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; color: #000; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* Secret Triggers */
         #ghostAdmin { position: fixed; top: 0; left: 0; width: 80px; height: 80px; z-index: 2000000; cursor: default; }
         #ghostPleb { position: fixed; top: 0; right: 0; width: 80px; height: 80px; z-index: 2000000; cursor: default; }
 
@@ -103,10 +102,14 @@
             document.getElementById('lockdown').style.display="none"; 
             document.getElementById('loginOverlay').style.display="none"; 
             document.getElementById('app').style.display="flex";
-            const res = await fetch('https://https://api.github.com');
-            const data = await res.json();
-            gameData = data.filter(f => f.name.endsWith('.html') && f.name !== 'index.html');
-            renderGrid();
+            
+            try {
+                // CHANGED: Pointed to your new repository
+                const res = await fetch('https://api.github.com/repos/sqsqs353-alt/the-mongle-thing/contents/');
+                const data = await res.json();
+                gameData = data.filter(f => f.name.endsWith('.html') && f.name !== 'index.html');
+                renderGrid();
+            } catch(e) { console.error("Load failed"); }
         };
 
         window.renderGrid = () => {
@@ -126,7 +129,8 @@
                 const card = document.createElement('div'); card.className = "card";
                 card.innerHTML = `<div class="fav-area" onclick="toggleFav(event,'${g.name}')"><span class="fav-btn ${favs.includes(g.name)?'active':''}">❤</span></div>${g.name.replace('.html','').toUpperCase()}`;
                 card.onclick = () => {
-                    const url = `https://github.com/sqsqs353-alt/the-mongle-thing/edit/main/${g.name}`;
+                    // CHANGED: Pointed raw links to your new repository
+                    const url = `https://raw.githack.com/sqsqs353-alt/the-mongle-thing/main/${g.name}`;
                     if(cfg.mode==='blank') {
                         activeGameWindow = window.open('about:blank');
                         activeGameWindow.document.body.innerHTML = `<style>body,html{margin:0;padding:0;height:100vh;width:100vw;overflow:hidden;background:#000}iframe{width:100vw;height:100vh;border:none}</style><iframe src="${url}" allowfullscreen></iframe>`;
@@ -143,7 +147,8 @@
         
         window.addEventListener('keydown', (e) => {
             if (cfg.enable && (e.key === cfg.key || e.code === cfg.key)) panicTrigger();
-            if (e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); document.getElementById('loginOverlay').style.display = 'flex'; }
+            // RESTORED: Shift + L shortcut
+            if (e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); door(); }
         }, true);
 
         window.saveConfig = () => {
